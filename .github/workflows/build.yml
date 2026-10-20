@@ -1,0 +1,106 @@
+name: build
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CGO_ENABLED: "0"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # sqlc generates the typed query code (internal/db/*.sql.go, models.go,
+      # sqlc.go) that is gitignored; version must match the one the code was
+      # generated with.
+      - name: Install sqlc
+        run: |
+          curl -fsSL -o sqlc.tar.gz \
+            https://github.com/sqlc-dev/sqlc/releases/download/v1.31.1/sqlc_1.31.1_linux_amd64.tar.gz
+          tar -xzf sqlc.tar.gz sqlc
+          sudo mv sqlc /usr/local/bin/sqlc
+          sqlc version
+
+      - name: Generate SQL code
+        run: go generate ./...
+
+      # elm-esm is a thin wrapper that finds `elm` on the PATH, so the
+      # official compiler binary is installed first. Version must match
+      # the "elm-version" field in ui/elm.json.
+      - name: Install Elm compiler
+        run: |
+          curl -fsSL -o elm.gz \
+            https://github.com/elm/compiler/releases/download/0.19.2/elm-0.19.2-linux-x64.gz
+          gunzip -f elm.gz
+          chmod +x elm
+          sudo mv elm /usr/local/bin/elm
+          elm --version
+
+      - name: Install elm-esm
+        run: npm install -g elm-esm@1.1.4
+
+      - name: Build UI
+        run: |
+          mkdir -p ui/build
+          cd ui && elm-esm make src/Main.elm --output=build/app.js
+
+      - name: Build binaries
+        run: |
+          mkdir -p dist
+          for target in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64 windows-amd64; do
+            goos=${target%-*}
+            goarch=${target#*-}
+            name="ez-forensics-${target}"
+            [ "$goos" = "windows" ] && name="${name}.exe"
+            GOOS="$goos" GOARCH="$goarch" go build -trimpath -ldflags "-s -w" \
+              -o "dist/${name}" ./cmd/app
+          done
+          cp README.md LICENSE.md dist/
+
+      - name: Package
+        run: |
+          mkdir -p pkg
+          tar -czf pkg/ez-forensics-linux-amd64.tar.gz  -C dist ez-forensics-linux-amd64 README.md LICENSE.md
+          tar -czf pkg/ez-forensics-linux-arm64.tar.gz  -C dist ez-forensics-linux-arm64 README.md LICENSE.md
+          tar -czf pkg/ez-forensics-darwin-amd64.tar.gz -C dist ez-forensics-darwin-amd64 README.md LICENSE.md
+          tar -czf pkg/ez-forensics-darwin-arm64.tar.gz -C dist ez-forensics-darwin-arm64 README.md LICENSE.md
+          (cd dist && zip -q ../pkg/ez-forensics-windows-amd64.zip \
+            ez-forensics-windows-amd64.exe README.md LICENSE.md)
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ez-forensics-builds
+          path: pkg/
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ez-forensics-builds
+          path: dist
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
