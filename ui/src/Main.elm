@@ -403,7 +403,6 @@ view model =
                     Nothing ->
                         text ""
                 , viewList model
-                , viewDetail model
                 ]
             , nav [ class "pager" ]
                 [ button [ onClick PrevPage ] [ text "← Newer" ]
@@ -411,6 +410,12 @@ view model =
                 , button [ onClick NextPage ] [ text "Older →" ]
                 ]
             ]
+        , case model.detail of
+                Closed ->
+                    text ""
+
+                _ ->
+                    viewDetail model
         ]
     }
 
@@ -423,7 +428,8 @@ viewList model =
                 |> List.map
                     (\m ->
                         tr [ onClick (OpenMessage m.id), class "mail-row" ]
-                            [ td [ class "from" ] [ text (displayName m) ]
+                            [ td [ class "date" ] [ text (shortDate m.date) ]
+                            , td [ class "from" ] [ text (displayName m) ]
                             , td [ class "subject" ]
                                 (div []
                                     [ span [ class "subject-line" ] [ text (orNoSubject m.subject) ]
@@ -431,7 +437,6 @@ viewList model =
                                     ]
                                     |> List.singleton
                                 )
-                            , td [ class "date" ] [ text (shortDate m.date) ]
                             ]
                     )
             )

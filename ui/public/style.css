@@ -132,7 +132,7 @@ button:hover {
 
 .mail-row .date {
 	width: 110px;
-	text-align: right;
+	text-align: left;
 	color: var(--muted);
 	font-size: 0.85rem;
 	white-space: nowrap;
@@ -160,12 +160,21 @@ button:hover {
 	font-size: 0.85rem;
 }
 
-/* detail pane */
+/* detail popup */
 
 .detail {
+	position: fixed;
+	top: 2vh;
+	left: 2vw;
+	right: 2vw;
+	bottom: 2vh;
+	z-index: 10;
 	background: var(--panel);
-	padding: 1rem 1.5rem;
-	border-top: 2px solid var(--border);
+	border: 1px solid var(--border);
+	border-radius: 0.75rem;
+	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+	padding: 1.25rem 1.75rem;
+	overflow-y: auto;
 }
 
 .detail header {
