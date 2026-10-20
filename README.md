@@ -12,6 +12,9 @@ loaded into memory fully). Per message only metadata, a text snippet and the
 extracted body text are stored in SQLite; the raw bytes stay in the source
 file. Each message records its byte offset and size, so the original
 unmodified evidence can be re-read from the UI at any time.
+The recorded path is relative to the server's working directory: if you
+move or rename the imported mbox files, the raw view breaks until the
+paths in `mbox_files` are updated (or the files are re-imported).
 
 Imported fields: Message-Id, From (name + address), To, Subject, Date,
 text body (text/plain preferred over text/html), snippet. Everything is
