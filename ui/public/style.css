@@ -59,6 +59,20 @@ body {
 	border-color: var(--accent);
 }
 
+.toolbar select {
+	padding: 0.45rem 0.75rem;
+	border: 1px solid var(--border);
+	border-radius: 0.5rem;
+	font-size: 0.95rem;
+	background: var(--panel);
+	color: var(--text);
+	outline: none;
+}
+
+.toolbar select:focus {
+	border-color: var(--accent);
+}
+
 button {
 	padding: 0.4rem 0.8rem;
 	border: none;

@@ -20,6 +20,12 @@ Imported fields: Message-Id, From (name + address), To, Subject, Date,
 text body (text/plain preferred over text/html), snippet. Everything is
 indexed in SQLite FTS5 for full-text search.
 
+`-import` takes a file or a directory (walked recursively for `.mbox`
+files). Re-running it is safe: already-imported messages are skipped and
+only new ones are appended, so a folder that is still syncing can be
+imported now and re-imported as it grows. Each mbox file is imported in a
+single transaction, so a crash never leaves a half-imported file.
+
 ## Stack
 
 - Go backend (stdlib `net/http`), UI embedded into the binary
@@ -44,10 +50,10 @@ go build ./cmd/app
 
 API:
 
-- `GET /api/messages?q=&limit=&offset=` — paginated list, newest first; with `q` an FTS5 search (ranked)
+- `GET /api/messages?q=&folder=&limit=&offset=` — paginated list, newest first; with `q` an FTS5 search (ranked); with `folder` restricted to messages from mbox files in that folder (the folder's path relative to the working directory)
 - `GET /api/messages/{id}` — single message with body
 - `GET /api/messages/{id}/raw?head=` — raw bytes from the source mbox file
-- `GET /api/files` — imported mbox files
+- `GET /api/files` — imported mbox files with folder and message counts
 - `GET /api/stats` — message count
 - `POST /api/import` — `{"path": "..."}` import from a server-local path
 

@@ -1,10 +1,11 @@
 module Main exposing (main)
 
 import Browser exposing (UrlRequest(..))
+import Dict
 import Browser.Navigation as Navigation exposing (Key)
-import Html exposing (Html, button, div, h1, header, input, main_, nav, p, pre, section, span, table, tbody, td, text, tr)
+import Html exposing (Html, button, div, h1, header, input, main_, nav, option, p, pre, section, select, span, table, tbody, td, text, tr)
 import Html.Attributes exposing (class, colspan, href, placeholder, target, type_, value)
-import Html.Events exposing (onClick, onInput)
+import Html.Events exposing (onClick, onInput, targetValue)
 import Json.Decode as Decode
 import Http
 import Json.Decode as Decode
@@ -34,11 +35,23 @@ main =
 type alias Model =
     { messages : List Message
     , total : Maybe Int
+    , files : List MboxFile
     , query : String
+    , folder : String
     , page : Int
     , detail : Detail
     , key : Navigation.Key
     , error : Maybe String
+    }
+
+
+type alias MboxFile =
+    { id : Int
+    , path : String
+    , folder : String
+    , size : Int
+    , importedAt : String
+    , messageCount : Int
     }
 
 
@@ -87,29 +100,38 @@ init : () -> Url -> Key -> ( Model, Cmd Msg )
 init _ url key =
     let
         r =
-            Maybe.withDefault { q = "", page = 0, id = Nothing } (Url.Parser.parse routeParser url)
+            Maybe.withDefault { q = "", page = 0, id = Nothing, folder = "" } (Url.Parser.parse routeParser url)
     in
     ( { messages = []
       , total = Nothing
+      , files = []
       , query = r.q
+      , folder = r.folder
       , page = r.page
       , detail = Closed
       , key = key
       , error = Nothing
       }
-    , Cmd.batch [ fetchMessages r.q r.page, fetchStats, maybeFetchDetail r.id ]
+    , Cmd.batch [ fetchMessages r.q r.folder r.page, fetchStats, fetchFiles, maybeFetchDetail r.id ]
     )
 
 
 type alias Route =
-    { q : String, page : Int, id : Maybe Int }
+    { q : String, page : Int, id : Maybe Int, folder : String }
 
 
 routeParser : Url.Parser.Parser (Route -> a) a
 routeParser =
     Url.Parser.map
-        (\q page id -> { q = Maybe.withDefault "" q, page = Maybe.withDefault 0 page, id = id })
-        (Url.Parser.top <?> Query.string "q" <?> Query.int "page" <?> Query.int "id")
+        (\q page id folder ->
+            { q = Maybe.withDefault "" q, page = Maybe.withDefault 0 page, id = id, folder = Maybe.withDefault "" folder }
+        )
+        (Url.Parser.top
+            <?> Query.string "q"
+            <?> Query.int "page"
+            <?> Query.int "id"
+            <?> Query.string "folder"
+        )
 
 
 route : Model -> Maybe Int -> String
@@ -117,6 +139,7 @@ route model detailId =
     Url.Builder.absolute []
         (List.filterMap identity
             [ model.query |> nonEmpty |> Maybe.map (Url.Builder.string "q")
+            , model.folder |> nonEmpty |> Maybe.map (Url.Builder.string "folder")
             , Just (Url.Builder.int "page" model.page)
             , detailId |> Maybe.map (Url.Builder.int "id")
             ]
@@ -151,11 +174,13 @@ type Msg
     | OnUrlRequest Browser.UrlRequest
     | FetchedMessages (Result Http.Error (List Message))
     | FetchedStats (Result Http.Error Stats)
+    | FetchedFiles (Result Http.Error (List MboxFile))
     | FetchedDetail Int (Result Http.Error MessageDetail)
     | FetchedRaw (Result Http.Error String)
     | SearchInput String
     | SearchKey Int
     | SubmitSearch
+    | FolderChanged String
     | PrevPage
     | NextPage
     | OpenMessage Int
@@ -189,6 +214,12 @@ update msg model =
         FetchedStats (Err _) ->
             ( model, Cmd.none )
 
+        FetchedFiles (Ok files) ->
+            ( { model | files = files }, Cmd.none )
+
+        FetchedFiles (Err _) ->
+            ( model, Cmd.none )
+
         FetchedDetail _ (Ok detail) ->
             ( { model | detail = Shown detail }, Cmd.none )
 
@@ -206,26 +237,34 @@ update msg model =
 
         SearchKey code ->
             if code == 13 then
-                ( { model | page = 0 }, Cmd.batch [ fetchMessages model.query 0, Navigation.pushUrl model.key (route { model | query = model.query, page = 0 } Nothing) ] )
+                ( { model | page = 0 }, Cmd.batch [ fetchMessages model.query model.folder 0, Navigation.pushUrl model.key (route { model | query = model.query, page = 0 } Nothing) ] )
             else
                 ( model, Cmd.none )
 
         SubmitSearch ->
-            ( { model | page = 0 }, Cmd.batch [ fetchMessages model.query 0, Navigation.pushUrl model.key (route { model | query = model.query, page = 0 } Nothing) ] )
+            ( { model | page = 0 }, Cmd.batch [ fetchMessages model.query model.folder 0, Navigation.pushUrl model.key (route { model | query = model.query, page = 0 } Nothing) ] )
+
+        FolderChanged folder ->
+            ( { model | folder = folder, page = 0, detail = Closed }
+            , Cmd.batch
+                [ fetchMessages model.query folder 0
+                , Navigation.pushUrl model.key (route { model | folder = folder, page = 0 } Nothing)
+                ]
+            )
 
         PrevPage ->
             let
                 page =
                     max 0 (model.page - 1)
             in
-            ( { model | page = page, detail = Closed }, Cmd.batch [ fetchMessages model.query page, Navigation.pushUrl model.key (route { model | page = page } Nothing) ] )
+            ( { model | page = page, detail = Closed }, Cmd.batch [ fetchMessages model.query model.folder page, Navigation.pushUrl model.key (route { model | page = page } Nothing) ] )
 
         NextPage ->
             let
                 page =
                     model.page + 1
             in
-            ( { model | page = page, detail = Closed }, Cmd.batch [ fetchMessages model.query page, Navigation.pushUrl model.key (route { model | page = page } Nothing) ] )
+            ( { model | page = page, detail = Closed }, Cmd.batch [ fetchMessages model.query model.folder page, Navigation.pushUrl model.key (route { model | page = page } Nothing) ] )
 
         OpenMessage id ->
             ( { model | detail = Loading id }, Cmd.batch [ fetchDetail id, Navigation.pushUrl model.key (route model (Just id)) ] )
@@ -274,13 +313,14 @@ httpError err =
 -- API
 
 
-fetchMessages : String -> Int -> Cmd Msg
-fetchMessages query page =
+fetchMessages : String -> String -> Int -> Cmd Msg
+fetchMessages query folder page =
     Http.get
         { url =
             Url.Builder.absolute [ "api", "messages" ]
                 (List.filterMap identity
                     [ query |> nonEmpty |> Maybe.map (Url.Builder.string "q")
+                    , folder |> nonEmpty |> Maybe.map (Url.Builder.string "folder")
                     , Just (Url.Builder.int "limit" pageSize)
                     , Just (Url.Builder.int "offset" (page * pageSize))
                     ]
@@ -294,6 +334,14 @@ fetchStats =
     Http.get
         { url = Url.Builder.absolute [ "api", "stats" ] []
         , expect = Http.expectJson FetchedStats statsDecoder
+        }
+
+
+fetchFiles : Cmd Msg
+fetchFiles =
+    Http.get
+        { url = Url.Builder.absolute [ "api", "files" ] []
+        , expect = Http.expectJson FetchedFiles (Decode.list mboxFileDecoder)
         }
 
 
@@ -370,6 +418,17 @@ type alias Stats =
     { messages : Int }
 
 
+mboxFileDecoder : Decode.Decoder MboxFile
+mboxFileDecoder =
+    Decode.succeed MboxFile
+        |> required "id" Decode.int
+        |> required "path" Decode.string
+        |> required "folder" (nullableOr Decode.string "")
+        |> required "size" Decode.int
+        |> required "imported_at" Decode.string
+        |> required "message_count" Decode.int
+
+
 
 -- VIEW
 
@@ -381,6 +440,13 @@ view model =
         [ div [ class "app" ]
             [ header [ class "toolbar" ]
                 [ h1 [] [ text "ez-forensics" ]
+                , select
+                    [ class "folder-select"
+                    , value model.folder
+                    , Html.Events.on "change"
+                        (targetValue |> Decode.map FolderChanged)
+                    ]
+                    (folderOptions model.files)
                 , input
                     [ type_ "search"
                     , placeholder "Search mail…"
@@ -474,6 +540,45 @@ shortDate d =
 
         _ ->
             d
+
+
+-- One option per source folder (group of mbox files), with the summed
+-- message count. "All mail" (empty value) shows everything.
+folderOptions : List MboxFile -> List (Html Msg)
+folderOptions files =
+    let
+        total =
+            List.sum (List.map .messageCount files)
+    in
+    [ option [ value "" ] [ text ("All mail (" ++ String.fromInt total ++ ")") ] ]
+        ++ List.map
+            (\( folder, folderFiles ) ->
+                option
+                    [ value folder ]
+                    [ text (folderLabel folder ++ " (" ++ String.fromInt (List.sum (List.map .messageCount folderFiles)) ++ ")") ]
+            )
+            (files
+                |> List.foldl
+                    (\f acc ->
+                        Dict.update f.folder
+                            (\entries ->
+                                Just (f :: Maybe.withDefault [] entries)
+                            )
+                            acc
+                    )
+                    Dict.empty
+                |> Dict.toList
+            )
+
+
+folderLabel : String -> String
+folderLabel folder =
+    case List.reverse (String.split "/" folder) of
+        last :: _ ->
+            last
+
+        [] ->
+            folder
 
 
 viewDetail : Model -> Html Msg
