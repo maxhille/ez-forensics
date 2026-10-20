@@ -5,6 +5,7 @@
 CREATE TABLE mbox_files (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     path TEXT NOT NULL UNIQUE,
+    folder TEXT NOT NULL DEFAULT '',
     size INTEGER NOT NULL,
     imported_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

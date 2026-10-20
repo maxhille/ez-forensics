@@ -35,7 +35,7 @@ func Import(ctx context.Context, database *sql.DB, path string) (int, error) {
 		if !strings.HasSuffix(strings.ToLower(d.Name()), ".mbox") {
 			return nil
 		}
-		n, err := importFile(ctx, queries, p)
+		n, err := importFile(ctx, queries, database, p)
 		if err != nil {
 			return fmt.Errorf("%s: %w", p, err)
 		}
@@ -48,23 +48,43 @@ func Import(ctx context.Context, database *sql.DB, path string) (int, error) {
 	return total, nil
 }
 
-func importFile(ctx context.Context, queries *db.Queries, path string) (int, error) {
+func importFile(ctx context.Context, queries *db.Queries, database *sql.DB, path string) (int, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return 0, err
 	}
 
-	if err := queries.InsertMboxFile(ctx, db.InsertMboxFileParams{
-		Path: path,
-		Size: info.Size(),
+	folder := filepath.Dir(path)
+	if folder == "." {
+		folder = ""
+	}
+
+	// One transaction per file: a single commit (fast) and atomic — a crash
+	// mid-import rolls the whole file back, never a partial one.
+	tx, err := database.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+	qtx := queries.WithTx(tx)
+
+	if err := qtx.InsertMboxFile(ctx, db.InsertMboxFileParams{
+		Path:   path,
+		Folder: folder,
+		Size:   info.Size(),
 	}); err != nil {
 		return 0, fmt.Errorf("register mbox file: %w", err)
 	}
-	file, err := queries.GetMboxFileByPath(ctx, path)
+	file, err := qtx.GetMboxFileByPath(ctx, path)
 	if err != nil {
 		return 0, fmt.Errorf("lookup mbox file: %w", err)
 	}
 	fileID := file.ID
+
+	before, err := qtx.CountMessagesForFile(ctx, fileID)
+	if err != nil {
+		return 0, fmt.Errorf("count messages: %w", err)
+	}
 
 	f, err := os.Open(path)
 	if err != nil {
@@ -73,14 +93,14 @@ func importFile(ctx context.Context, queries *db.Queries, path string) (int, err
 	defer f.Close()
 
 	count := 0
-	err = mbox.Parse(f, func(msg *mbox.Message) error {
-		row, perr := toRow(msg)
-		if perr != nil {
-			log.Printf("import %s @%d: %v", path, msg.Offset, perr)
+	perr := mbox.Parse(f, func(msg *mbox.Message) error {
+		row, rerr := toRow(msg)
+		if rerr != nil {
+			log.Printf("import %s @%d: %v", path, msg.Offset, rerr)
 			row = &messageRow{Offset: msg.Offset, Size: msg.Size}
 		}
 		row.MboxFileID = fileID
-		if serr := insertMessage(ctx, queries, row); serr != nil {
+		if serr := insertMessage(ctx, qtx, row); serr != nil {
 			return serr
 		}
 		count++
@@ -89,11 +109,21 @@ func importFile(ctx context.Context, queries *db.Queries, path string) (int, err
 		}
 		return nil
 	})
-	if err != nil {
-		return count, fmt.Errorf("parse: %w", err)
+	if perr != nil {
+		return count, fmt.Errorf("parse: %w", perr)
 	}
-	log.Printf("import %s: %d messages", path, count)
-	return count, nil
+
+	after, err := qtx.CountMessagesForFile(ctx, fileID)
+	if err != nil {
+		return 0, fmt.Errorf("count messages: %w", err)
+	}
+	stored := after - before
+
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit: %w", err)
+	}
+	log.Printf("import %s: %d new messages", path, stored)
+	return int(stored), nil
 }
 
 type messageRow struct {

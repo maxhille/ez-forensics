@@ -1,7 +1,7 @@
 tmp
 ui/build
 ui/elm-stuff
-ez-forensics.db
+ez-forensics.db*
 internal/db/sqlc.go
 internal/db/models.go
 internal/db/*.sql.go

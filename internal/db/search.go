@@ -55,13 +55,16 @@ SELECT m.id, m.message_id, m.from_addr, m.from_name, m.to_addrs,
        f.path
 FROM messages m
 JOIN mbox_files f ON f.id = m.mbox_file_id
+WHERE (? = '' OR f.folder = ?)
 ORDER BY m.date DESC
 LIMIT ? OFFSET ?
 `
 
-// ListMessages returns a page of messages, newest first.
-func ListMessages(ctx context.Context, q *sql.DB, limit, offset int64) ([]MessageRow, error) {
-	rows, err := q.QueryContext(ctx, listSQL, limit, offset)
+// ListMessages returns a page of messages, newest first. An empty folder
+// selects all mail; otherwise only messages whose mbox file sits in that
+// folder.
+func ListMessages(ctx context.Context, q *sql.DB, folder string, limit, offset int64) ([]MessageRow, error) {
+	rows, err := q.QueryContext(ctx, listSQL, folder, folder, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -87,13 +90,15 @@ FROM messages_fts
 JOIN messages m ON m.id = messages_fts.rowid
 JOIN mbox_files f ON f.id = m.mbox_file_id
 WHERE messages_fts MATCH ?
+  AND (? = '' OR f.folder = ?)
 ORDER BY rank
 LIMIT ? OFFSET ?
 `
 
 // SearchMessages runs an FTS5 MATCH query against the message index.
-func SearchMessages(ctx context.Context, q *sql.DB, match string, limit, offset int64) ([]MessageRow, error) {
-	rows, err := q.QueryContext(ctx, searchSQL, match, limit, offset)
+// folder behaves as in ListMessages.
+func SearchMessages(ctx context.Context, q *sql.DB, match, folder string, limit, offset int64) ([]MessageRow, error) {
+	rows, err := q.QueryContext(ctx, searchSQL, match, folder, folder, limit, offset)
 	if err != nil {
 		return nil, err
 	}

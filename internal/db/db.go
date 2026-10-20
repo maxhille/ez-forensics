@@ -36,6 +36,11 @@ func Open(dbUri string) (*sql.DB, error) {
 		db.Close()
 		return nil, err
 	}
+	// WAL lets the server keep serving reads while an import writes.
+	if _, err := db.Exec("PRAGMA journal_mode = WAL"); err != nil {
+		db.Close()
+		return nil, err
+	}
 	goose.SetBaseFS(migrationsFS)
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		db.Close()

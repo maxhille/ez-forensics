@@ -65,14 +65,16 @@ func limitOffset(r *http.Request) (int64, int64) {
 }
 
 // handleListMessages returns a page of messages, optionally filtered by an
-// FTS5 query (parameter q). Sort is newest first, or rank for searches.
+// FTS5 query (parameter q) and by source folder (parameter folder).
+// Sort is newest first, or rank for searches.
 func (a *api) handleListMessages() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		limit, offset := limitOffset(r)
 		query := r.URL.Query().Get("q")
+		folder := r.URL.Query().Get("folder")
 
 		if query == "" {
-			rows, err := db.ListMessages(r.Context(), a.db, limit, offset)
+			rows, err := db.ListMessages(r.Context(), a.db, folder, limit, offset)
 			if err != nil {
 				log.Printf("list: %v", err)
 				writeError(w, http.StatusInternalServerError, "internal error")
@@ -82,7 +84,7 @@ func (a *api) handleListMessages() http.HandlerFunc {
 			return
 		}
 
-		rows, err := db.SearchMessages(r.Context(), a.db, ftsQuery(query), limit, offset)
+		rows, err := db.SearchMessages(r.Context(), a.db, ftsQuery(query), folder, limit, offset)
 		if err != nil {
 			log.Printf("search: %v", err)
 			writeError(w, http.StatusBadRequest, "invalid search query")
