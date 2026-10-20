@@ -15,29 +15,30 @@ type MessageRow struct {
 	Subject    string `json:"subject"`
 	Date       string `json:"date"`
 	Snippet    string `json:"snippet"`
-	FtsSnippet string `json:"ftsSnippet"`
+	// FtsSnippet holds the FTS5 body snippet around the match for search
+	// rows. It is null for messages with an empty body that matched only in
+	// a header field: FTS5's snippet() returns NULL there.
+	FtsSnippet *string `json:"ftsSnippet"`
 	MboxPath   string `json:"mboxPath"`
 	ByteOffset int64  `json:"byteOffset"`
 	ByteSize   int64  `json:"byteSize"`
 }
 
 // scanFields fills the common fields of a MessageRow, converting SQL
-// NULLs to empty strings. fts is non-nil for the search query, which
-// selects the FTS snippet as an extra trailing column.
-func (r *MessageRow) scanFields(sc interface{ Scan(...any) error }, fts *string) error {
+// NULLs to empty strings. When fts is set, the search query's trailing
+// FTS snippet column is scanned into FtsSnippet, which stays nil if the
+// column is NULL.
+func (r *MessageRow) scanFields(sc interface{ Scan(...any) error }, fts bool) error {
 	var messageId, fromAddr, fromName, toAddrs, subject, date, snippet sql.NullString
 	args := []any{
 		&r.ID, &messageId, &fromAddr, &fromName, &toAddrs,
 		&subject, &date, &snippet, &r.ByteOffset, &r.ByteSize, &r.MboxPath,
 	}
-	if fts != nil {
-		args = append(args, fts)
+	if fts {
+		args = append(args, &r.FtsSnippet)
 	}
 	if err := sc.Scan(args...); err != nil {
 		return err
-	}
-	if fts != nil {
-		r.FtsSnippet = *fts
 	}
 	r.MessageID = messageId.String
 	r.FromAddr = fromAddr.String
@@ -73,7 +74,7 @@ func ListMessages(ctx context.Context, q *sql.DB, folder string, limit, offset i
 	out := []MessageRow{}
 	for rows.Next() {
 		var r MessageRow
-		if err := r.scanFields(rows, nil); err != nil {
+		if err := r.scanFields(rows, false); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -107,7 +108,7 @@ func SearchMessages(ctx context.Context, q *sql.DB, match, folder string, limit,
 	out := []MessageRow{}
 	for rows.Next() {
 		var r MessageRow
-		if err := r.scanFields(rows, &r.FtsSnippet); err != nil {
+		if err := r.scanFields(rows, true); err != nil {
 			return nil, err
 		}
 		out = append(out, r)

@@ -373,7 +373,7 @@ messageDecoder =
         |> required "subject" (nullableOr Decode.string "")
         |> required "date" (nullableOr Decode.string "")
         |> required "snippet" (nullableOr Decode.string "")
-        |> required "ftsSnippet" (Decode.maybe (nullableOr Decode.string ""))
+        |> required "ftsSnippet" (Decode.maybe Decode.string)
         |> required "mboxPath" (nullableOr Decode.string "")
 
 

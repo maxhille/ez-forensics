@@ -230,7 +230,7 @@ type messageDetail struct {
 }
 
 func toMessageDetail(r db.MessageRow, body string) messageDetail {
-	return messageDetail{
+	d := messageDetail{
 		ID:         r.ID,
 		MessageID:  r.MessageID,
 		FromAddr:   r.FromAddr,
@@ -239,10 +239,13 @@ func toMessageDetail(r db.MessageRow, body string) messageDetail {
 		Subject:    r.Subject,
 		Date:       r.Date,
 		Snippet:    r.Snippet,
-		FtsSnippet: r.FtsSnippet,
 		MboxPath:   r.MboxPath,
 		ByteOffset: r.ByteOffset,
 		ByteSize:   r.ByteSize,
 		Body:       body,
 	}
+	if r.FtsSnippet != nil {
+		d.FtsSnippet = *r.FtsSnippet
+	}
+	return d
 }
