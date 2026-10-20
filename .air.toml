@@ -1,6 +1,6 @@
 [build]
 bin = "./tmp/app"
-full_bin = "./tmp/app -db /tmp/forensics.db -addr 0.0.0.0:8080"
+full_bin = "./tmp/app -db ez-forensics.db -addr 0.0.0.0:8080"
 cmd = "go build -o ./tmp/app ./cmd/app"
 
 exclude_dir = ["ui/src", "ui/elm-stuff", "tmp"]
